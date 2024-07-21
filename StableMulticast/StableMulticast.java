@@ -1,11 +1,8 @@
 package StableMulticast;
+
 import java.net.*;
-import java.util.*;
-
 import java.io.*;
-
-
-
+import java.util.*;
 
 public class StableMulticast {
     private String ip;
@@ -18,14 +15,18 @@ public class StableMulticast {
     private int[] localClock;
     private String localId;
 
+    //group
+    private String multicastAddress = "230.0.0.0";
+    private int multicastPort = 4446;
+
     public StableMulticast(String ip, Integer port, IStableMulticast client) throws Exception {
         this.ip = ip;
         this.port = port;
         this.client = client;
-        this.socket = new DatagramSocket();
+        this.socket = new DatagramSocket(port);
         this.groupMembers = new ArrayList<>();
         this.vectorClocks = new HashMap<>();
-        this.buffer = new ArrayList<>();
+        this.buffer = new ArrayList<Message>();
         this.localId = InetAddress.getLocalHost().getHostName() + ":" + port;
         this.localClock = new int[256]; // Presumindo um máximo de 256 processos
 
@@ -48,16 +49,27 @@ public class StableMulticast {
         DatagramPacket packet = new DatagramPacket(data, data.length, member.getAddress(), member.getPort());
         socket.send(packet);
     }
-
+    //multicastSocket.receive(packet);
+    //String received = new String(packet.getData(), 0, packet.getLength());
     private void receiveMessages() {
         try {
             while (true) {
-                byte[] buffer = new byte[1024];
+                byte[] buffer = new byte[2048]; // Increased buffer size
                 DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
                 socket.receive(packet);
 
-                Message msg = Message.deserialize(packet.getData());
+                // Only read the actual data length from the packet
+                byte[] data = Arrays.copyOf(packet.getData(), packet.getLength());
+
+                Message msg = Message.deserialize(data);
                 processMessage(msg);
+
+                // byte[] buffer = new byte[1024];
+                // DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
+                // socket.receive(packet);
+
+                // Message msg = Message.deserialize(packet.getData());
+                // processMessage(msg);
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -99,33 +111,54 @@ public class StableMulticast {
 
     private void discoverGroup() {
         try {
-            MulticastSocket multicastSocket = new MulticastSocket(4446);
-            InetAddress group = InetAddress.getByName("224.0.0.1");
+            MulticastSocket multicastSocket = new MulticastSocket(multicastPort);
+            InetAddress group = InetAddress.getByName(multicastAddress);
             multicastSocket.joinGroup(group);
-    
-            while (true) {
-                byte[] buf = new byte[256];
-                DatagramPacket packet = new DatagramPacket(buf, buf.length);
-                multicastSocket.receive(packet);
-    
-                String received = new String(packet.getData(), 0, packet.getLength());
-                if (!received.equals(localId)) {
-                    groupMembers.add(new InetSocketAddress(packet.getAddress(), packet.getPort()));
+
+            // Thread para receber anúncios multicast
+            new Thread(() -> {
+                try {
+                    while (true) {
+                        byte[] buf = new byte[256];
+                        DatagramPacket packet = new DatagramPacket(buf, buf.length);
+                        multicastSocket.receive(packet);
+
+                        String received = new String(packet.getData(), 0, packet.getLength());
+                        if (!received.equals(localId)) {
+                            String[] parts = received.split(":");
+                            String host = parts[0];
+                            int port = Integer.parseInt(parts[1]);
+                            InetSocketAddress member = new InetSocketAddress(InetAddress.getByName(host), port);
+
+                            if (!groupMembers.contains(member)) {
+                                groupMembers.add(member);
+                                System.out.println("Discovered member: " + member);
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
                 }
-    
-                // Enviar anúncio da própria presença
-                String msg = localId;
-                byte[] data = msg.getBytes();
-                DatagramPacket announcement = new DatagramPacket(data, data.length, group, 4446);
-                multicastSocket.send(announcement);
-    
-                Thread.sleep(5000);
-            }
+            }).start();
+
+            // Thread para enviar anúncios multicast
+            new Thread(() -> {
+                try {
+                    while (true) {
+                        String msg = localId;
+                        byte[] data = msg.getBytes();
+                        DatagramPacket announcement = new DatagramPacket(data, data.length, group, multicastPort);
+                        multicastSocket.send(announcement);
+                        Thread.sleep(5000);
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }).start();
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
-    
 
     private int getLocalIndex() {
         return getIndex(localId);
@@ -133,33 +166,5 @@ public class StableMulticast {
 
     private int getIndex(String id) {
         return id.hashCode() % 256;
-    }
-
-    private static class Message {
-        String content;
-        int[] vectorClock;
-        String sender;
-
-        Message(String content, int[] vectorClock, String sender) {
-            this.content = content;
-            this.vectorClock = vectorClock;
-            this.sender = sender;
-        }
-
-        public byte[] serialize() throws IOException {
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            ObjectOutputStream oos = new ObjectOutputStream(baos);
-            oos.writeObject(this);
-            oos.close();
-            return baos.toByteArray();
-        }
-        
-        public static Message deserialize(byte[] data) throws IOException, ClassNotFoundException {
-            ByteArrayInputStream bais = new ByteArrayInputStream(data);
-            ObjectInputStream ois = new ObjectInputStream(bais);
-            Message msg = (Message) ois.readObject();
-            ois.close();
-            return msg;
-        }
     }
 }
