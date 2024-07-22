@@ -36,8 +36,11 @@ public class StableMulticastTest implements IStableMulticast {
 
             // Loop para enviar mensagens
             while (true) {
-                String msg = scanner.nextLine();
-                user.sendMessage(msg);
+                if(scanner.hasNextLine()) 
+                {
+                    String msg = scanner.nextLine();
+                    user.sendMessage(msg);
+                }
             }
         } catch (Exception e) {
             e.printStackTrace();

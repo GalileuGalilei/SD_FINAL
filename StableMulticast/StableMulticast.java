@@ -39,8 +39,43 @@ public class StableMulticast {
         Message message = new Message(msg, Arrays.copyOf(localClock, localClock.length), localId);
         localClock[getLocalIndex()]++;
 
+        System.out.println("Send this message to all members of the group ? (Y/N)");
+        Scanner scanner = new Scanner(System.in);
+        String answer = scanner.nextLine();
+        while(!answer.equals("Y") && !answer.equals("N")){
+            System.out.println("Invalid answer, please type Y or N");
+            answer = scanner.nextLine();
+        }
+
+        if(answer.contains("Y"))
+        {
+            sendToAll(message);
+        }
+        else
+        {
+            sendOneByOne(message);
+        }
+    }
+
+    private void sendToAll(Message msg) throws Exception {
         for (InetSocketAddress member : groupMembers) {
-            sendUnicast(message, member);
+            sendUnicast(msg, member);
+        }
+    }
+
+    private void sendOneByOne(Message msg) throws Exception {
+        Scanner scanner = new Scanner(System.in);
+        for (InetSocketAddress member : groupMembers) {
+            System.out.println("Send this message to " + member + " now ? (Y)");
+            String answer = scanner.nextLine();
+            while(!answer.equals("Y")){
+                System.out.println("Invalid answer, please type Y");
+                answer = scanner.nextLine();
+            }
+
+            if(answer.contains("Y")){
+                sendUnicast(msg, member);
+            }
         }
     }
 
