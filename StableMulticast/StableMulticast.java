@@ -11,7 +11,7 @@ public class StableMulticast {
     private DatagramSocket socket;
     private List<InetSocketAddress> groupMembers;
     private Map<String, int[]> vectorClocks;
-    private Map<String, Message[]> buffer;
+    private Map<String, List<Message>> buffer;
     private int[] localClock;
     private String localId;
 
@@ -28,7 +28,7 @@ public class StableMulticast {
         this.vectorClocks = new HashMap<>();
         this.buffer = new HashMap<>();
         this.localId = InetAddress.getLocalHost().getHostName() + ":" + port;
-        this.localClock = new int[256]; // Presumindo um máximo de 256 processos
+        this.localClock = new int[8]; // Presumindo um máximo de 8 processos
 
         // Iniciar a descoberta de grupo e a escuta de mensagens
         new Thread(this::discoverGroup).start();
@@ -105,21 +105,22 @@ public class StableMulticast {
     }
 
     private void processMessage(Message msg) {
-        int senderIndex = getIndex(msg.sender);
-
-        // Atualizar o relógio vetorial local
-        vectorClocks.put(msg.sender, msg.vectorClock);
+        String sender = msg.sender;
+        int senderIndex = getIndex(sender);
+    
+        // Update the local vector clock for the sender
+        vectorClocks.put(sender, msg.vectorClock);
         localClock[senderIndex]++;
-
-        // Adicionar a mensagem ao buffer
-        if (!buffer.containsKey(msg.sender)) 
-        {
-            buffer.put(msg.sender, new Message[groupMembers.size()]);
-        }
-
-        // Entregar mensagens estáveis
+    
+        // Add the message to the buffer
+        buffer.computeIfAbsent(sender, k -> new ArrayList<>()).add(msg);
+    
+        // Deliver stable messages
         deliverStableMessages();
+    
+        // Debugging output
         PrintClocks();
+        PrintBuffer();
     }
 
     private void PrintClocks() 
@@ -130,39 +131,43 @@ public class StableMulticast {
         }
     }
 
-    private void deliverStableMessages() 
+    private void PrintBuffer() 
     {
-        for (String sender : buffer.keySet()) 
+        for (Map.Entry<String, List<Message>> entry : buffer.entrySet()) 
         {
-            Message[] messages = buffer.get(sender);
+            System.out.println(entry.getKey() + " : " + entry.getValue());
+        }
+    }
+
+    private void deliverStableMessages() {
+        for (Map.Entry<String, List<Message>> entry : buffer.entrySet()) {
+            String sender = entry.getKey();
+            List<Message> messages = entry.getValue();
             int senderIndex = getIndex(sender);
-
-            for (int i = 0; i < messages.length; i++) 
-            {
-                if (messages[i] == null) 
-                {
-                    continue;
-                }
-
+    
+            Iterator<Message> iterator = messages.iterator();
+            while (iterator.hasNext()) {
+                Message message = iterator.next();
+    
                 boolean stable = true;
-                for (int[] clock : vectorClocks.values()) 
-                {
-                    if (clock[senderIndex] < messages[i].vectorClock[senderIndex]) 
-                    {
+                for (int[] clock : vectorClocks.values()) {
+                    if (clock[senderIndex] < message.vectorClock[senderIndex]) {
                         stable = false;
                         break;
                     }
                 }
-
+    
                 if (stable) 
                 {
-                    client.deliver(messages[i].content);
-                    // Remove a mensagem do buffer
-                    messages[i] = null;
+                    //deixa isso aqui por enquanto para debug
+                    client.deliver(message.content);
+                    // Remove the message from the buffer
+                    iterator.remove();
                 }
             }
         }
-
+    }
+    
 
 
       //  for (Iterator<Message> iterator = buffer.iterator(); iterator.hasNext();) {
@@ -181,7 +186,6 @@ public class StableMulticast {
             //    iterator.remove();
           //  }
         //}
-    }
 
     private void discoverGroup() {
         try {
@@ -241,7 +245,7 @@ public class StableMulticast {
 
     private int getIndex(String id) 
     {
-        int hash = (id.hashCode() % 256);
+        int hash = (id.hashCode() % 8);
         return hash < 0 ? hash * -1 : hash;
     }
 }
