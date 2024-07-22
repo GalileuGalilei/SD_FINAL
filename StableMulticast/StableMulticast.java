@@ -11,7 +11,7 @@ public class StableMulticast {
     private DatagramSocket socket;
     private List<InetSocketAddress> groupMembers;
     private Map<String, int[]> vectorClocks;
-    private List<Message> buffer;
+    private Map<String, Message[]> buffer;
     private int[] localClock;
     private String localId;
 
@@ -26,7 +26,7 @@ public class StableMulticast {
         this.socket = new DatagramSocket(port);
         this.groupMembers = new ArrayList<>();
         this.vectorClocks = new HashMap<>();
-        this.buffer = new ArrayList<Message>();
+        this.buffer = new HashMap<>();
         this.localId = InetAddress.getLocalHost().getHostName() + ":" + port;
         this.localClock = new int[256]; // Presumindo um máximo de 256 processos
 
@@ -98,13 +98,6 @@ public class StableMulticast {
 
                 Message msg = Message.deserialize(data);
                 processMessage(msg);
-
-                // byte[] buffer = new byte[1024];
-                // DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
-                // socket.receive(packet);
-
-                // Message msg = Message.deserialize(packet.getData());
-                // processMessage(msg);
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -119,29 +112,75 @@ public class StableMulticast {
         localClock[senderIndex]++;
 
         // Adicionar a mensagem ao buffer
-        buffer.add(msg);
+        if (!buffer.containsKey(msg.sender)) 
+        {
+            buffer.put(msg.sender, new Message[groupMembers.size()]);
+        }
 
         // Entregar mensagens estáveis
         deliverStableMessages();
+        PrintClocks();
     }
 
-    private void deliverStableMessages() {
-        for (Iterator<Message> iterator = buffer.iterator(); iterator.hasNext();) {
-            Message msg = iterator.next();
-            boolean stable = true;
+    private void PrintClocks() 
+    {
+        for (Map.Entry<String, int[]> entry : vectorClocks.entrySet()) 
+        {
+            System.out.println(entry.getKey() + " : " + Arrays.toString(entry.getValue()));
+        }
+    }
 
-            for (int[] clock : vectorClocks.values()) {
-                if (clock[getIndex(msg.sender)] < msg.vectorClock[getIndex(msg.sender)]) {
-                    stable = false;
-                    break;
+    private void deliverStableMessages() 
+    {
+        for (String sender : buffer.keySet()) 
+        {
+            Message[] messages = buffer.get(sender);
+            int senderIndex = getIndex(sender);
+
+            for (int i = 0; i < messages.length; i++) 
+            {
+                if (messages[i] == null) 
+                {
+                    continue;
+                }
+
+                boolean stable = true;
+                for (int[] clock : vectorClocks.values()) 
+                {
+                    if (clock[senderIndex] < messages[i].vectorClock[senderIndex]) 
+                    {
+                        stable = false;
+                        break;
+                    }
+                }
+
+                if (stable) 
+                {
+                    client.deliver(messages[i].content);
+                    // Remove a mensagem do buffer
+                    messages[i] = null;
                 }
             }
-
-            if (stable) {
-                client.deliver(msg.content);
-                iterator.remove();
-            }
         }
+
+
+
+      //  for (Iterator<Message> iterator = buffer.iterator(); iterator.hasNext();) {
+    //        Message msg = iterator.next();
+  //          boolean stable = true;
+//
+            //for (int[] clock : vectorClocks.values()) {
+                //if (clock[getIndex(msg.sender)] < msg.vectorClock[getIndex(msg.sender)]) {
+                  //  stable = false;
+                  //  break;
+                //}
+            //}
+
+            //if (stable) {
+              //  client.deliver(msg.content);
+            //    iterator.remove();
+          //  }
+        //}
     }
 
     private void discoverGroup() {
@@ -195,11 +234,14 @@ public class StableMulticast {
         }
     }
 
-    private int getLocalIndex() {
+    private int getLocalIndex() 
+    {
         return getIndex(localId);
     }
 
-    private int getIndex(String id) {
-        return id.hashCode() % 256;
+    private int getIndex(String id) 
+    {
+        int hash = (id.hashCode() % 256);
+        return hash < 0 ? hash * -1 : hash;
     }
 }
