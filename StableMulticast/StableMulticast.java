@@ -84,8 +84,7 @@ public class StableMulticast {
         DatagramPacket packet = new DatagramPacket(data, data.length, member.getAddress(), member.getPort());
         socket.send(packet);
     }
-    //multicastSocket.receive(packet);
-    //String received = new String(packet.getData(), 0, packet.getLength());
+
     private void receiveMessages() {
         try {
             while (true) {
@@ -104,7 +103,8 @@ public class StableMulticast {
         }
     }
 
-    private void processMessage(Message msg) {
+    private void processMessage(Message msg) 
+    {
         String sender = msg.sender;
         int senderIndex = getIndex(sender);
     
@@ -115,31 +115,37 @@ public class StableMulticast {
         // Add the message to the buffer
         buffer.computeIfAbsent(sender, k -> new ArrayList<>()).add(msg);
     
+        // Garbage collect old messages
+        GarbageCollect();
+
         // Deliver stable messages
-        deliverStableMessages();
+        client.deliver(msg.content);
     
         // Debugging output
         PrintClocks();
         PrintBuffer();
     }
 
-    private void PrintClocks() 
-    {
-        for (Map.Entry<String, int[]> entry : vectorClocks.entrySet()) 
-        {
-            System.out.println(entry.getKey() + " : " + Arrays.toString(entry.getValue()));
+    private void PrintClocks() {
+        System.out.println("Vector Clocks:");
+        for (Map.Entry<String, int[]> entry : vectorClocks.entrySet()) {
+            System.out.println(entry.getKey() + ": " + Arrays.toString(entry.getValue()));
+        }
+        System.out.println("Local Clock: " + Arrays.toString(localClock));
+    }
+    
+    private void PrintBuffer() {
+        System.out.println("Buffer:");
+        for (Map.Entry<String, List<Message>> entry : buffer.entrySet()) {
+            System.out.print(entry.getKey() + ": ");
+            for (Message msg : entry.getValue()) {
+                System.out.print(msg.content + " ");
+            }
+            System.out.println();
         }
     }
 
-    private void PrintBuffer() 
-    {
-        for (Map.Entry<String, List<Message>> entry : buffer.entrySet()) 
-        {
-            System.out.println(entry.getKey() + " : " + entry.getValue());
-        }
-    }
-
-    private void deliverStableMessages() {
+    private void GarbageCollect() {
         for (Map.Entry<String, List<Message>> entry : buffer.entrySet()) {
             String sender = entry.getKey();
             List<Message> messages = entry.getValue();
@@ -148,45 +154,29 @@ public class StableMulticast {
             Iterator<Message> iterator = messages.iterator();
             while (iterator.hasNext()) {
                 Message message = iterator.next();
+                boolean canBeGarbageCollected = true;
     
-                boolean stable = true;
+                // Check if all vector clocks are greater than the message's vector clock for the sender
                 for (int[] clock : vectorClocks.values()) {
-                    if (clock[senderIndex] < message.vectorClock[senderIndex]) {
-                        stable = false;
+                    if (clock[senderIndex] <= message.vectorClock[senderIndex]) {
+                        canBeGarbageCollected = false;
                         break;
                     }
                 }
     
-                if (stable) 
-                {
-                    //deixa isso aqui por enquanto para debug
-                    client.deliver(message.content);
-                    // Remove the message from the buffer
+                // Check if the local clock is greater than the message's vector clock for the sender
+                if (localClock[senderIndex] <= message.vectorClock[senderIndex]) {
+                    canBeGarbageCollected = false;
+                }
+    
+                // Remove the message from the buffer if it can be garbage collected
+                if (canBeGarbageCollected) {
                     iterator.remove();
                 }
             }
         }
     }
     
-
-
-      //  for (Iterator<Message> iterator = buffer.iterator(); iterator.hasNext();) {
-    //        Message msg = iterator.next();
-  //          boolean stable = true;
-//
-            //for (int[] clock : vectorClocks.values()) {
-                //if (clock[getIndex(msg.sender)] < msg.vectorClock[getIndex(msg.sender)]) {
-                  //  stable = false;
-                  //  break;
-                //}
-            //}
-
-            //if (stable) {
-              //  client.deliver(msg.content);
-            //    iterator.remove();
-          //  }
-        //}
-
     private void discoverGroup() {
         try {
             MulticastSocket multicastSocket = new MulticastSocket(multicastPort);
