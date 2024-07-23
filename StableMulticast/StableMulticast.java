@@ -44,8 +44,8 @@ public class StableMulticast {
             System.exit(0);
         }
 
-        Message message = new Message(msg, Arrays.copyOf(localClock, localClock.length), localId, client.getUsername());
         localClock[getLocalIndex()]++;
+        Message message = new Message(msg, Arrays.copyOf(localClock, localClock.length), localId, client.getUsername());
 
         System.out.println("Send this message to all members of the group ? (Y/N)");
         Scanner scanner = new Scanner(System.in);
@@ -132,7 +132,7 @@ public class StableMulticast {
     private void processMessage(Message msg) 
     {
         String sender = msg.sender;
-        int senderIndex = getIndex(sender);
+        int senderIndex = getIndex(msg.senderName);
     
         // Update the local vector clock for the sender
         vectorClocks.put(msg.senderName, msg.vectorClock);
@@ -193,17 +193,19 @@ public class StableMulticast {
             while (iterator.hasNext()) {
                 Message message = iterator.next();
                 boolean canBeGarbageCollected = true;
-    
+
+
                 // Check if all vector clocks are greater than the message's vector clock for the sender
-                for (int[] clock : vectorClocks.values()) {
-                    if (clock[senderIndex] <= message.vectorClock[senderIndex]) {
+                for (int[] clock : vectorClocks.values()) 
+                {
+                    if (clock[senderIndex] < message.vectorClock[senderIndex]) {
                         canBeGarbageCollected = false;
                         break;
                     }
                 }
     
                 // Check if the local clock is greater than the message's vector clock for the sender
-                if (localClock[senderIndex] <= message.vectorClock[senderIndex]) {
+                if (localClock[senderIndex] < message.vectorClock[senderIndex]) {
                     canBeGarbageCollected = false;
                 }
     
@@ -241,6 +243,14 @@ public class StableMulticast {
 
                             if (!groupMembers.contains(member)) {
                                 groupMembers.add(member);
+                                int[] clock = new int[8];
+                                for (int i = 0; i < 8; i++) {
+                                    clock[i] = 0;
+                                }
+
+                                vectorClocks.put(username, clock);
+
+                                buffer.put(username, new ArrayList<>());
                                 System.out.println("Discovered user " + username + "!");
                             }
                         }
@@ -271,7 +281,7 @@ public class StableMulticast {
 
     private int getLocalIndex() 
     {
-        return getIndex(localId);
+        return getIndex(client.getUsername());
     }
 
     private int getIndex(String id) 
