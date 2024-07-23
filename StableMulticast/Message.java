@@ -7,11 +7,13 @@ public class Message implements Serializable {
     String content;
     int[] vectorClock;
     String sender;
+    String senderName;
 
-    Message(String content, int[] vectorClock, String sender) {
+    Message(String content, int[] vectorClock, String sender, String senderName) {
         this.content = content;
         this.vectorClock = vectorClock;
         this.sender = sender;
+        this.senderName = senderName;
     }
 
     byte[] serialize() throws IOException {

@@ -19,10 +19,11 @@ public class StableMulticast {
     private String multicastAddress = "230.0.0.0";
     private int multicastPort = 4446;
 
-    public StableMulticast(String ip, Integer port, IStableMulticast client) throws Exception {
+    public StableMulticast(String ip, Integer port, String username, IStableMulticast client) throws Exception {
         this.ip = ip;
         this.port = port;
         this.client = client;
+        this.client.setUsername(username);
         this.socket = new DatagramSocket(port);
         this.groupMembers = new ArrayList<>();
         this.vectorClocks = new HashMap<>();
@@ -36,7 +37,14 @@ public class StableMulticast {
     }
 
     public void msend(String msg, IStableMulticast client) throws Exception {
-        Message message = new Message(msg, Arrays.copyOf(localClock, localClock.length), localId);
+        if (msg.equalsIgnoreCase("exit")) {
+            sendExitMessage();
+            socket.close();
+            System.out.println("You have left the group.");
+            System.exit(0);
+        }
+
+        Message message = new Message(msg, Arrays.copyOf(localClock, localClock.length), localId, client.getUsername());
         localClock[getLocalIndex()]++;
 
         System.out.println("Send this message to all members of the group ? (Y/N)");
@@ -85,6 +93,16 @@ public class StableMulticast {
         socket.send(packet);
     }
 
+    private void sendExitMessage() throws Exception {
+        String exitMessage = "EXIT:" + localId + ":" + client.getUsername();
+        byte[] data = exitMessage.getBytes();
+        for (InetSocketAddress member : groupMembers) {
+            DatagramPacket packet = new DatagramPacket(data, data.length, member.getAddress(), member.getPort());
+            socket.send(packet);
+        }
+    }
+    
+
     private void receiveMessages() {
         try {
             while (true) {
@@ -94,9 +112,17 @@ public class StableMulticast {
 
                 // Only read the actual data length from the packet
                 byte[] data = Arrays.copyOf(packet.getData(), packet.getLength());
+                String recievedData = new String(data);
 
-                Message msg = Message.deserialize(data);
-                processMessage(msg);
+                if(recievedData.contains("EXIT:"))
+                {
+                    processExitMessage(recievedData.substring(5));
+                }
+                else
+                {
+                    Message msg = Message.deserialize(data);
+                    processMessage(msg);
+                }
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -109,21 +135,33 @@ public class StableMulticast {
         int senderIndex = getIndex(sender);
     
         // Update the local vector clock for the sender
-        vectorClocks.put(sender, msg.vectorClock);
+        vectorClocks.put(msg.senderName, msg.vectorClock);
         localClock[senderIndex]++;
     
         // Add the message to the buffer
-        buffer.computeIfAbsent(sender, k -> new ArrayList<>()).add(msg);
+        buffer.computeIfAbsent(msg.senderName, k -> new ArrayList<>()).add(msg);
     
         // Garbage collect old messages
         GarbageCollect();
 
         // Deliver stable messages
-        client.deliver(msg.content);
+        client.deliver(msg.content, msg.senderName);
     
         // Debugging output
         PrintClocks();
         PrintBuffer();
+    }
+
+    private void processExitMessage(String msg) throws Exception {
+        String[] parts = msg.split(":");
+        String host = parts[0];
+        String port = parts[1];
+        String username = parts[2];
+        InetSocketAddress member = new InetSocketAddress(InetAddress.getByName(host), Integer.parseInt(port));
+        groupMembers.remove(member);
+        vectorClocks.remove(username);
+        buffer.remove(username);
+        System.out.println("User " + username + " has left the group.");
     }
 
     private void PrintClocks() {
@@ -192,15 +230,18 @@ public class StableMulticast {
                         multicastSocket.receive(packet);
 
                         String received = new String(packet.getData(), 0, packet.getLength());
-                        if (!received.equals(localId)) {
-                            String[] parts = received.split(":");
-                            String host = parts[0];
-                            int port = Integer.parseInt(parts[1]);
-                            InetSocketAddress member = new InetSocketAddress(InetAddress.getByName(host), port);
+                        String[] parts = received.split(":");
+                        String host = parts[0];
+                        String port = parts[1];
+                        String username = parts[2];
+                        String fullId = host + ":" + port;
+                        if (!fullId.equals(localId)) {
+                            int port_int = Integer.parseInt(port);
+                            InetSocketAddress member = new InetSocketAddress(InetAddress.getByName(host), port_int);
 
                             if (!groupMembers.contains(member)) {
                                 groupMembers.add(member);
-                                System.out.println("Discovered member: " + member);
+                                System.out.println("Discovered user " + username + "!");
                             }
                         }
                     }
@@ -213,7 +254,7 @@ public class StableMulticast {
             new Thread(() -> {
                 try {
                     while (true) {
-                        String msg = localId;
+                        String msg = localId + ":" + client.getUsername();
                         byte[] data = msg.getBytes();
                         DatagramPacket announcement = new DatagramPacket(data, data.length, group, multicastPort);
                         multicastSocket.send(announcement);
