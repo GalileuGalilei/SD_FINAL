@@ -12,7 +12,7 @@ public class StableMulticastTest implements IStableMulticast {
 
     @Override
     public void deliver(String msg, String username) {
-        System.out.println(username + " Sent: " + msg);
+        System.out.println("\n" + username + " Sent: " + msg + "\n");
     }
 
     @Override

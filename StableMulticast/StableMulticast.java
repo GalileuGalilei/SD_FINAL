@@ -161,7 +161,7 @@ public class StableMulticast {
         groupMembers.remove(member);
         vectorClocks.remove(username);
         buffer.remove(username);
-        System.out.println("User " + username + " has left the group.");
+        System.out.println("User " + username + " has left the group.\n");
     }
 
     private void PrintClocks() {
